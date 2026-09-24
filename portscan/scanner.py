@@ -2,6 +2,7 @@ import socket
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from time import perf_counter
 
 # ============================================================
 # Configuração — Alvo '192.168.0.247' & Port '8000'
@@ -43,19 +44,27 @@ def verifica_porta(ip, porta, timeout=1.0):
 
 
 # ============================================================
-# Parte 3 — Varrer um intervalo de portas
+# Parte 3.1 — Varredura com threads
 # ============================================================
-print(f"Escaneando portas {porta_inicial} a {porta_final}...\n")
+
+portas = range(porta_inicial, porta_final + 1)
+
+print(f"Escaneando portas {porta_inicial} a {porta_final} com {threads} threads...\n")
 inicio = time.perf_counter()
 
-for porta in range(porta_inicial, porta_final + 1):
-    estado = verifica_porta(ip_alvo, porta, timeout)
-    if estado == "ABERTA":
-        print(f"Porta {porta}: ABERTA")
+with ThreadPoolExecutor(max_workers=100) as executor:
+    estados = executor.map(lambda p: verifica_porta(ip_alvo, p, timeout), portas)
+    resultados = list(zip(portas, estados))
 
-fim = time.perf_counter()
-print(f"\nTempo total: {fim - inicio:.1f}s")
+    fim = time.perf_counter()
 
-# ============================================================
-# Parte 4 —
-# ============================================================
+    for porta, estado in resultados:
+        if estado == "ABERTA":
+            print(f"Porta {porta}: ABERTA")
+
+abertas = sum(1 for _, estado in resultados if estado == "ABERTA")
+fechadas = sum(1 for _, estado in resultados if estado == "FECHADA")
+filtradas = sum(1 for _, estado in resultados if estado == "FILTRADA")
+
+print(f"\nResumo: {abertas} abertas, {fechadas} fechadas, {filtradas} filtradas")
+print(f"Tempo total: {fim - inicio:.1f}s")
