@@ -1,11 +1,11 @@
 import socket
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
-from time import perf_counter
 import argparse
 import json
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+
 
 # ============================================================
 # Argumentos de linha de comando
@@ -20,7 +20,6 @@ def interpreta_portas(texto):
             if inicio > fim:
                 raise ValueError(f"intervalo invertido: {parte}")
             portas.update(range(inicio, fim + 1))
-            pass
         else:
             portas.add(int(parte))
 
@@ -40,7 +39,6 @@ parser.add_argument("-t", "--threads", type=int, default=100,
                     help="número de threads (padrão: 100)")
 parser.add_argument("--timeout", type=float, default=1.0,
                     help="segundos de espera por porta (padrão: 1.0)")
-
 parser.add_argument("--json", metavar="ARQUIVO",
                     help="salva o relatório em JSON no arquivo indicado")
 args = parser.parse_args()
@@ -53,6 +51,7 @@ except ValueError as erro:
 alvo = args.alvo
 threads = args.threads
 timeout = args.timeout
+
 
 # ============================================================
 # Parte 1 — Resolver o nome do alvo para um IP
@@ -76,45 +75,44 @@ def verifica_porta(ip, porta, timeout=1.0):
             s.connect((ip, porta))
             return "ABERTA"
         except ConnectionRefusedError:
-            return "FECHADA"   # recusa RST
+            return "FECHADA"   # recebeu RST: nada escutando
         except (socket.timeout, TimeoutError):
-            return "FILTRADA"  # silencio ate o timeout. provavel firewall
+            return "FILTRADA"  # silêncio até o timeout: provável firewall
         except OSError:
             return "ERRO"
 
 
 # ============================================================
-# Parte 3.1 — Varredura com threads
+# Parte 3 — Varredura concorrente com threads
 # ============================================================
-
-print(f"Escaneando {len(portas)} portas com {threads} threads...\n")
+print(f"Escaneando {len(portas)} porta(s) com {threads} threads...\n")
 inicio = time.perf_counter()
 
-with ThreadPoolExecutor(max_workers=100) as executor:
+with ThreadPoolExecutor(max_workers=threads) as executor:
     estados = executor.map(lambda p: verifica_porta(ip_alvo, p, timeout), portas)
     resultados = list(zip(portas, estados))
 
-    fim = time.perf_counter()
-
+fim = time.perf_counter()
 
 abertas = sum(1 for _, estado in resultados if estado == "ABERTA")
 fechadas = sum(1 for _, estado in resultados if estado == "FECHADA")
 filtradas = sum(1 for _, estado in resultados if estado == "FILTRADA")
 
-# ============================================================
-# Parte 4 — Identificação de serviço e pega_banner
-# ============================================================
 
+# ============================================================
+# Parte 4 — Identificação de serviço e banner grabbing
+# ============================================================
 def nome_servico(porta):
     try:
-        return socket.getservbyname(porta, "tcp")
+        return socket.getservbyport(porta, "tcp")
     except OSError:
-        return("desconhecido")
+        return "desconhecido"
+
 
 def pega_banner(ip, porta, timeout=2.0):
     try:
         with socket.create_connection((ip, porta), timeout=timeout) as s:
-            # serviços que falam sem interrupçao do query client
+            # serviços que falam independentes do query client
             try:
                 dados = s.recv(1024)
             except (socket.timeout, TimeoutError):
@@ -133,6 +131,43 @@ def pega_banner(ip, porta, timeout=2.0):
     except OSError:
         return ""
 
+
+abertas_info = []
+for porta, estado in resultados:
+    if estado == "ABERTA":
+        abertas_info.append(
+            {
+                "porta": porta,
+                "servico": nome_servico(porta),
+                "banner": pega_banner(ip_alvo, porta),
+            }
+        )
+
+
 # ============================================================
-# Fase 5 — Relatório e exportação em .json
+# Parte 5 — Relatório e exportação .json
 # ============================================================
+print(f"\n{'PORTA':<8}{'SERVIÇO':<14}BANNER")
+print("-" * 60)
+for info in abertas_info:
+    print(f"{info['porta']:<8}{info['servico']:<14}{info['banner'][:50]}")
+
+if not abertas_info:
+    print("Nenhuma porta aberta encontrada.")
+
+print(f"\nResumo: {abertas} abertas, {fechadas} fechadas, {filtradas} filtradas")
+print(f"Tempo de varredura: {fim - inicio:.1f}s")
+
+if args.json:
+    relatorio = {
+        "alvo": alvo,
+        "ip": ip_alvo,
+        "data": datetime.now().isoformat(timespec="seconds"),
+        "portas_escaneadas": len(portas),
+        "tempo_segundos": round(fim - inicio, 2),
+        "resumo": {"abertas": abertas, "fechadas": fechadas, "filtradas": filtradas},
+        "portas_abertas": abertas_info,
+    }
+    with open(args.json, "w", encoding="utf-8") as f:
+        json.dump(relatorio, f, indent=2, ensure_ascii=False)
+    print(f"Relatório salvo em {args.json}")
