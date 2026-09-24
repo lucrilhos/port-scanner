@@ -4,6 +4,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
 import argparse
+import json
+from datetime import datetime
 
 # ============================================================
 # Argumentos de linha de comando
@@ -38,6 +40,9 @@ parser.add_argument("-t", "--threads", type=int, default=100,
                     help="número de threads (padrão: 100)")
 parser.add_argument("--timeout", type=float, default=1.0,
                     help="segundos de espera por porta (padrão: 1.0)")
+
+parser.add_argument("--json", metavar="ARQUIVO",
+                    help="salva o relatório em JSON no arquivo indicado")
 args = parser.parse_args()
 
 try:
@@ -91,17 +96,43 @@ with ThreadPoolExecutor(max_workers=100) as executor:
 
     fim = time.perf_counter()
 
-    for porta, estado in resultados:
-        if estado == "ABERTA":
-            print(f"Porta {porta}: ABERTA")
 
 abertas = sum(1 for _, estado in resultados if estado == "ABERTA")
 fechadas = sum(1 for _, estado in resultados if estado == "FECHADA")
 filtradas = sum(1 for _, estado in resultados if estado == "FILTRADA")
 
-print(f"\nResumo: {abertas} abertas, {fechadas} fechadas, {filtradas} filtradas")
-print(f"Tempo total: {fim - inicio:.1f}s")
+# ============================================================
+# Parte 4 — Identificação de serviço e pega_banner
+# ============================================================
+
+def nome_servico(porta):
+    try:
+        return socket.getservbyname(porta, "tcp")
+    except OSError:
+        return("desconhecido")
+
+def pega_banner(ip, porta, timeout=2.0):
+    try:
+        with socket.create_connection((ip, porta), timeout=timeout) as s:
+            # serviços que falam sem interrupçao do query client
+            try:
+                dados = s.recv(1024)
+            except (socket.timeout, TimeoutError):
+                dados = b""
+
+            # o serviço http espera o cliente falar se vier vazio
+            if not dados:
+                s.sendall(b"HEAD / HTTP/1.0\r\n\r\n")
+                try:
+                    dados = s.recv(1024)
+                except (socket.timeout, TimeoutError):
+                    dados = b""
+
+            texto = dados.decode(errors="ignore").strip()
+            return texto.splitlines()[0] if texto else ""
+    except OSError:
+        return ""
 
 # ============================================================
-# Parte 4 —
+# Fase 5 — Relatório e exportação em .json
 # ============================================================
